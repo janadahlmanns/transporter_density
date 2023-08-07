@@ -1,0 +1,170 @@
+---
+title: "Analysis of vGlut stainings for Marc"
+author: "Dr. Jana Dahlmanns"
+date: "`r Sys.Date()`"
+output: 
+  word_document:
+    reference_docx: reference_doc.docx
+header-includes:
+  - \usepackage{helvet} # this is used to set the font to helvetica instead of the horrible default
+  - \renewcommand{\familydefault}{\sfdefault}
+extra_dependencies: ["float"]
+fig_caption: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+library(tidyverse)
+library(EBImage)
+```
+
+
+```{r pull_results, include=F}
+condition_lookup <- readRDS(file = "./Results/condition_lookup.rds")
+colnames(condition_lookup) <- c("condition", "filename")
+condition_lookup <- data.frame(condition_lookup)
+#included_conditions <- unique(condition_lookup[,1])
+
+results <- data.frame(recording = condition_lookup$filename, condition = condition_lookup$condition)
+results <- results %>% mutate(green_norm_red_int = 0, green_norm_red_area = 0)
+
+data <- list()
+for (r in 1:nrow(condition_lookup)) {
+  # load recording
+  data[[r]] <- readRDS(file = paste("./Results/", substr(condition_lookup$filename[r], 1, (nchar(condition_lookup$filename[r])-4)), ".rds", sep=""))
+  # transfer data to results object
+  results$green_norm_red_int[r] <- data[[r]][["green_norm_red_int"]]
+  results$green_norm_red_area[r] <- data[[r]][["green_norm_red_area"]]
+}
+rm(list=setdiff(ls(), c("data", "results")))
+```
+
+## Analysis steps
+
+*Note: If the journal requires - as some do -, the analysis code can be made available through github.*
+Here, I'll walk you in detail through the analysis steps. A methods section to copy into the paper can be found at the end, as well as a table with all data for further analysis (the data is also available as .csv-file).
+
+### The images
+
+
+```{r show_thumbnails, echo = F, message = F, results='hide',fig.keep='all', out.width="50%", fig.cap="Thumbnails of all analyzed images"}
+
+plotlist <- list()
+for (r in 1:length(data)){
+  plotlist[[r]] <- data[[r]][["images"]][["rawimage"]]
+}
+n_row <- length(data) %/% 6
+plots_left <- length(data) %% 6
+if (plots_left > 0) {n_row <- n_row +1}
+par(mfrow=c(n_row, 6), mar=c(0, 0, 0, 0))
+sapply(seq_along(plotlist), function(x){
+  plot.new()
+  rasterImage(plotlist[[x]], xleft = 0, xright = 1,
+              ytop = 0, ybottom = 1, interpolate = FALSE)
+})
+par(mfrow=c(1,1), mar=c(0, 0, 0, 0))
+```
+
+
+
+The analyzed images contained three color channels.
+The red channel captured MAP2 emission, the green channel captured vGlut emission and the blue channel captured DAPI emission.
+<br>
+
+
+```{r show_original_image, echo = F, message = F, results='hide',fig.keep='all', out.width="50%", fig.cap="Exemplary image, separated into color channels and merge"}
+which_image = 9
+first_image <- data[[which_image]][["images"]][["rawimage"]]
+
+plotlist <- list()
+plotlist[[1]] <- rgbImage(red = channel(first_image,"r"))
+plotlist[[2]] <- rgbImage(green = channel(first_image,"g"))
+plotlist[[3]] <- rgbImage(blue = channel(first_image,"b"))
+plotlist[[4]] <- first_image
+par(mfrow=c(2, 2), mar=c(0, 0, 0, 0))
+sapply(seq_along(plotlist), function(x){
+  plot.new()
+  rasterImage(plotlist[[x]], xleft = 0, xright = 1,
+              ytop = 0, ybottom = 1, interpolate = FALSE)
+})
+```
+
+
+### Intensity value filtering
+
+As the illumination, imaging parameters, and, hence, also the fluorescence intensity, is not quantitatively comparable between recordings, the analysis was performed using parameters entered by the user.
+For both analyzed color channels (red and green), the user defined a threshold of intensity values to be included in the analysis: Values below the lower threshold were regarded as background fluorescence noise. 
+
+<br>
+
+```{r show_range_red, echo = F, message = F, results='hide',fig.keep='all', out.width="50%", fig.cap="Left: Original images, Right: Images of all pixels, that were included in the analysis as they were within the user chosen range."}
+plotlist <- list()
+plotlist[[1]] <- rgbImage(red = channel(first_image,"r"))
+plotlist[[3]] <- rgbImage(green = channel(first_image,"g"))
+plotlist[[2]] <- data[[which_image]][["images"]][["red_in_range"]]
+plotlist[[4]] <- data[[which_image]][["images"]][["green_in_range"]]
+par(mfrow=c(2, 2), mar=c(0, 0, 0, 0))
+sapply(seq_along(plotlist), function(x){
+  plot.new()
+  rasterImage(plotlist[[x]], xleft = 0, xright = 1,
+              ytop = 0, ybottom = 1, interpolate = FALSE)
+})
+```
+
+I calculated the sum of fluorescence intensity across the recorded field of view. In this summation, only the pixels above the chosen threshold were included - with this, the sum comprises the actual vGlut staining only and excluded the background fluorescence.
+
+### Normalization
+
+As mentioned, the absolute fluorescence values are not quantitatively comparable between different recordings  - at least not in the experimental design used here. The gathered vGlut fluorescence intensity values thus need to be normalized to the image they came from and to the "amount of neuron" that was in the respective field of view.
+A common way to do that would be to calculate the sum of fluorescence in the red MAP2- channel in the same way we did for the green vGlut channel and normalize vGlut signal to the MAP2 signal.
+The results for this are shown below.
+
+<br>
+
+
+```{r show_area_results, echo = F, fig.cap = "Results for normalization with intensity sum in red channel"}
+results %>% ggplot(aes(x = condition, y = green_norm_red_int)) + geom_boxplot() + geom_point() + labs(x = "condition", y = "arbitrary unit") + theme_bw(base_size = 15) + scale_x_discrete(guide = guide_axis(n.dodge = 2))
+```
+
+
+Another - probably more sensible - approach to the normalization would be to define the red pixels above threshold as before, but instead of accumulating their fluorescence, we use the number of above-threshold-pixels as normalization constant. 
+With this normalization method, we get the following results.
+
+<br>
+
+```{r show_int_results, echo = F, fig.cap = "Results for normalization with red channel area"}
+results %>% ggplot(aes(x = condition, y = green_norm_red_area)) + geom_boxplot() + geom_point() + labs(x = "condition", y = "arbitrary unit") + theme_bw(base_size = 15) + scale_x_discrete(guide = guide_axis(n.dodge = 2))
+```
+
+The fluorescence summation approach normalizes the vGlut fluorescence directly to the MAP2 emission, whereas the pixel-counting approach normalizes the vGlut fluorescence to the MAP2-stained area of the field of view, which is probably what we want here.
+
+## Sample sizes
+
+Number of analyzed images: `r nrow(results)`
+```{r sample_size, echo = F}
+knitr::kable(results %>% group_by(condition)  %>% summarize(n = n()))
+```
+
+## Methods section to copy
+
+### Normalization of fluorescence intensity
+
+The images were analyzed with a custom R shiny script: A user, blinded to the experimental condition, chose fluorescence intensity thresholds for the red (MAP2) and green (vGlut1) channel. Only above-threshold pixels were analyzed to exclude faint background fluorescence, stemming from general imaging noise and emission outside the imaging plane). We calculated the total fluorescence intensity for the vGlut1 channel. The resulting values were normalilzed to MAP2 fluorescence intensity in each image to account for varying amounts of dendrites captured by the fields of view.
+
+### Normalization of fluorescence area
+
+The images were analyzed with a custom R shiny script: A user, blinded to the experimental condition, chose fluorescence intensity thresholds for the red (MAP2) and green (vGlut1) channel. Only above-threshold pixels were analyzed to exclude faint background fluorescence, stemming from general imaging noise and emission outside the imaging plane). We calculated the total fluorescence intensity for the vGlut1 channel. The resulting values were normalilzed to MAP2 fluorescence area in each image to account for varying amounts of dendrites captured by the fields of view.
+
+
+## Resulting data table for further analysis
+For conveniece, this table can also be found in results.csv.
+<br>
+```{r table_results_int, echo=F, message = F, warning = F}
+knitr::kable(results, align = "lccc", position = "c")
+write.csv(results, "results.csv", row.names = T)
+```
+
+
+
+
